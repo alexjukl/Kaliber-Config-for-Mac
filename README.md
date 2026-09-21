@@ -22,9 +22,9 @@ Protocol notes: [docs/PROTOCOL-mouse.md](docs/PROTOCOL-mouse.md),
 
 ## Install (pre-built)
 
-Download `KaliberConfig.app.zip` from the [Releases](../../releases) page, unzip, and on first
-launch right-click → **Open** (the build is not notarized; macOS shows an "unidentified
-developer" warning once). Then grant Input Monitoring when asked — see below.
+Download `KaliberConfig.app.zip` from the [Releases](../../releases) page, unzip and open.
+Releases are signed with a Developer ID certificate and notarized, so Gatekeeper opens them
+directly. Then grant Input Monitoring when asked — see below.
 
 ## Build & run
 
@@ -38,16 +38,22 @@ open ../dist/KaliberConfig.app
 `swift test` runs the codec tests (they replay real report dumps from `tools/dumps/`).
 `Package.swift` also opens directly in Xcode.
 
+### Releasing (maintainer)
+
+`KaliberConfig/scripts/release.sh vX.Y.Z` builds, signs with the Developer ID certificate,
+notarizes via `notarytool` (keychain profile `kaliber-notary`), staples, and uploads the zip to
+the GitHub Release for that tag. CI only builds/tests and keeps an unsigned artifact.
+
 ### Input Monitoring permission
 
 Both devices expose their configuration channel on a USB interface that macOS classes as a
 keyboard, so the app must be allowed under **System Settings → Privacy & Security → Input
-Monitoring**. The app asks on first launch; it never reads keystrokes. The bundle is signed
-with a self-signed certificate named "Kaliber Config Local" if one exists in your keychain
-(`bundle.sh` looks it up; create one in Keychain Access → Certificate Assistant, type "Code
-Signing") so the permission survives rebuilds. Otherwise the bundle is ad-hoc signed and macOS
-forgets the grant after every rebuild — reset it with
-`tccutil reset ListenEvent com.alexjukl.kaliberconfig` and re-allow.
+Monitoring**. The app asks on first launch; it never reads keystrokes. `bundle.sh` signs with the first
+of: a Developer ID Application certificate, a self-signed "Kaliber Config Local" certificate
+(create one in Keychain Access → Certificate Assistant, type "Code Signing"), or ad-hoc. The
+first two give the app a stable identity so the permission survives rebuilds; with ad-hoc
+signing macOS forgets the grant after every rebuild (`tccutil reset ListenEvent
+com.alexjukl.kaliberconfig`, then re-allow).
 
 ## Layout
 

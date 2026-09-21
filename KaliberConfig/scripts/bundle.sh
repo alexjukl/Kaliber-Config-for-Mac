@@ -32,9 +32,18 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 [ -f scripts/AppIcon.icns ] && cp scripts/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-# Sign with the local self-signed "Kaliber Config Local" certificate when present (stable designated
-# requirement, so the Input Monitoring grant survives rebuilds); otherwise ad-hoc.
-IDENTITY=$( (security find-identity -v -p codesigning 2>/dev/null || true) | grep -o '"Kaliber Config Local"' | head -1 | tr -d '"' || true)
-codesign --force --sign "${IDENTITY:--}" --identifier com.alexjukl.kaliberconfig "$APP"
+# Signing, best available first:
+#   1. Developer ID Application (hardened runtime + secure timestamp; what release.sh notarizes)
+#   2. the local self-signed "Kaliber Config Local" cert (stable requirement for Input Monitoring during development)
+#   3. ad-hoc (CI; macOS forgets the Input Monitoring grant after each rebuild)
+# Set SIGN=local to force option 2 on a machine that also has a Developer ID cert.
+IDS=$(security find-identity -v -p codesigning 2>/dev/null || true)
+DEVID=$(echo "$IDS" | grep -o '"Developer ID Application: [^"]*"' | head -1 | tr -d '"' || true)
+LOCAL=$(echo "$IDS" | grep -o '"Kaliber Config Local"' | head -1 | tr -d '"' || true)
+if [ -n "$DEVID" ] && [ "${SIGN:-}" != "local" ]; then
+    codesign --force --options runtime --timestamp --sign "$DEVID" --identifier com.alexjukl.kaliberconfig "$APP"
+else
+    codesign --force --sign "${LOCAL:--}" --identifier com.alexjukl.kaliberconfig "$APP"
+fi
 codesign -d -r- "$APP" 2>&1 | grep designated
 echo "Built $APP"
