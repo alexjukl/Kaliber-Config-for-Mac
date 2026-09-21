@@ -26,7 +26,8 @@ codesign --verify --strict --verbose=2 "$APP"
 rm -f "$ZIP"; ditto -c -k --keepParent "$APP" "$ZIP"
 echo "notarizing…"
 xcrun notarytool submit "$ZIP" --keychain-profile "$PROFILE" --wait
-xcrun stapler staple "$APP"
+# the ticket can take a little while to reach Apple's CDN after "Accepted"
+for i in 1 2 3 4 5 6; do xcrun stapler staple "$APP" && break; echo "staple not ready yet, retrying ($i)…"; sleep 20; done
 rm -f "$ZIP"; ditto -c -k --keepParent "$APP" "$ZIP"
 spctl --assess --type execute --verbose=2 "$APP"
 echo "notarized + stapled: $ZIP"
