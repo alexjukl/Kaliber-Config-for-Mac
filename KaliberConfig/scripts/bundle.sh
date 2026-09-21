@@ -34,7 +34,7 @@ PLIST
 [ -f scripts/AppIcon.icns ] && cp scripts/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # Sign with the local self-signed "Kaliber Config Local" certificate when present (stable designated
 # requirement, so the Input Monitoring grant survives rebuilds); otherwise ad-hoc.
-IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null | grep -o '"Kaliber Config Local"' | head -1 | tr -d '"')
+IDENTITY=$( (security find-identity -v -p codesigning 2>/dev/null || true) | grep -o '"Kaliber Config Local"' | head -1 | tr -d '"' || true)
 codesign --force --sign "${IDENTITY:--}" --identifier com.alexjukl.kaliberconfig "$APP"
 codesign -d -r- "$APP" 2>&1 | grep designated
 echo "Built $APP"
