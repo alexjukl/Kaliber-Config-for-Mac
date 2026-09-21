@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.2.app || true
+      - name: Build
+        run: swift build -c release
+        working-directory: KaliberConfig
+      - name: Test
+        run: swift test
+        working-directory: KaliberConfig
+      - name: Bundle app (ad-hoc signed)
+        run: ./scripts/bundle.sh
+        working-directory: KaliberConfig
+      - name: Zip
+        run: ditto -c -k --keepParent dist/KaliberConfig.app KaliberConfig.app.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KaliberConfig.app
+          path: KaliberConfig.app.zip
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: KaliberConfig.app.zip
+          body: |
+            Unofficial macOS configurator for the Kaliber Gaming KORONA mouse and HVER PRO X keyboard.
+            The app is ad-hoc signed: after unzipping, right-click → Open the first time (or run
+            `xattr -d com.apple.quarantine KaliberConfig.app`), then allow it under
+            System Settings → Privacy & Security → Input Monitoring.

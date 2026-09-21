@@ -1,0 +1,14 @@
+# vendor binaries extracted from IOGEAR installers (not redistributable)
+extracted/
+# python probe env
+tools/.venv/
+# swift build products
+KaliberConfig/.build/
+KaliberConfig/*.xcodeproj
+KaliberConfig/.swiftpm/
+dist/
+.DS_Store
+# UI strings extracted from IOGEAR's installers (analysis aids, not ours to redistribute)
+docs/vendor-*
+# compiled probe helper
+tools/hidcheck
