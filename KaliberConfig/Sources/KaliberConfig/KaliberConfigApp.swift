@@ -27,7 +27,11 @@ struct KaliberConfigApp: App {
             CommandGroup(replacing: .newItem) {}
         }
         // Menu-bar switcher appears while per-app automation is on.
-        MenuBarExtra("Kaliber Config", systemImage: "keyboard", isInserted: $profiles.automationEnabled) {
+        // Binding that only writes on a real change: MenuBarExtra sets isInserted on every render, and a
+        // same-value write to an @Published property still publishes → endless re-render loop.
+        MenuBarExtra("Kaliber Config", systemImage: "keyboard", isInserted: Binding(
+            get: { profiles.automationEnabled },
+            set: { if profiles.automationEnabled != $0 { profiles.automationEnabled = $0 } })) {
             MenuBarContent().environmentObject(profiles)
         }
     }

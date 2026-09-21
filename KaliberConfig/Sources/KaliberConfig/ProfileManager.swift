@@ -41,10 +41,14 @@ struct ProfileStoreData: Codable {
 /// Profiles, per-app rules and the automatic switcher (the feature Synapse/G Hub users expect).
 @MainActor
 final class ProfileManager: ObservableObject {
-    @Published var profiles: [AppProfile] = [] { didSet { save() } }
-    @Published var rules: [AppRule] = [] { didSet { save() } }
-    @Published var defaultProfileID: UUID? { didSet { save() } }
-    @Published var automationEnabled = false { didSet { save(); if automationEnabled { evaluate(force: true) } } }
+    // `didSet` fires on same-value writes too (SwiftUI bindings do that on every render), so each one
+    // checks for an actual change — otherwise save()/evaluate() re-publish and the view loops forever.
+    @Published var profiles: [AppProfile] = [] { didSet { if profiles != oldValue { save() } } }
+    @Published var rules: [AppRule] = [] { didSet { if rules != oldValue { save() } } }
+    @Published var defaultProfileID: UUID? { didSet { if defaultProfileID != oldValue { save() } } }
+    @Published var automationEnabled = false {
+        didSet { guard automationEnabled != oldValue else { return }; save(); if automationEnabled { evaluate(force: true) } }
+    }
     @Published private(set) var activeProfileID: UUID?
     @Published private(set) var frontmostApp: (name: String, bundleID: String)?
     @Published private(set) var status = ""
