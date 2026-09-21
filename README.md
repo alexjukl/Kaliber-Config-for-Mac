@@ -9,8 +9,12 @@ ship with Windows software:
   8 macro slots with a recorder, backup/restore to JSON, factory defaults.
 * **HVER PRO X keyboard (GKB730-BN)** — the three on-board profiles: 19 lighting patterns with
   brightness, speed, direction and colour, per-key "Custom" colours (3 sets per profile, painted
-  on a key grid), active-profile switch, USB report rate, remapping of any key to any standard
-  key (with factory-layout restore), backup/restore.
+  on a key grid), active-profile switch, USB report rate, remapping of any key to a standard key,
+  media key, mouse button or macro (with factory-layout restore), a macro recorder that stores
+  macros in the keyboard's 10 KB macro memory, backup/restore.
+* **Profiles & per-app automation** — save named snapshots of both devices and have them switch
+  automatically when a given app comes to the front (with a menu-bar switcher), the way
+  Synapse / G Hub / iCUE do.
 
 Both screens have a live preview pane (on the tabs that have something to show) that renders the
 pending lighting, DPI indicator or button/key assignments before you press Apply.
@@ -70,8 +74,9 @@ extracted/ (git-ignored)  the Windows installers, unpacked
   vendor binary but could not be confirmed on this firmware (XCQ501); scroll-down code unknown.
   DPI lock and XY-independent DPI are not exposed.
 * Keyboard: report-rate byte mapping and direction values follow the vendor UI but were not
-  visually verified; macros and media/Fn-layer key functions are not implemented yet (the
-  commands are documented). Fn+PgUp/PgDn brightness changes are volatile
+  visually verified; macro *storage* round-trips byte-exactly but playback semantics (delays,
+  repeat) follow the vendor tool's serializer without a hardware check yet; Fn-layer functions
+  are not exposed. Fn+PgUp/PgDn brightness changes are volatile
   and do not show up in the app.
 * The firmware-update ("enter bootloader") command exists in the keyboard protocol and is
   deliberately never sent.

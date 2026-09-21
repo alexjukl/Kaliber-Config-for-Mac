@@ -5,22 +5,37 @@ import KaliberHID
 @main
 struct KaliberConfigApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var monitor = DeviceMonitor()
+    @StateObject private var monitor: DeviceMonitor
+    @StateObject private var profiles: ProfileManager
+
+    init() {
+        let m = DeviceMonitor()
+        _monitor = StateObject(wrappedValue: m)
+        _profiles = StateObject(wrappedValue: ProfileManager(monitor: m))
+    }
 
     var body: some Scene {
-        WindowGroup("Kaliber Config") {
+        Window("Kaliber Config", id: "main") {
             ContentView()
                 .environmentObject(monitor)
-                .frame(minWidth: 760, minHeight: 520)
+                .environmentObject(profiles)
+                .frame(minWidth: 820, minHeight: 540)
+                .onReceive(profiles.$automationEnabled) { AppDelegate.keepRunning = $0 }
         }
         .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {}
         }
+        // Menu-bar switcher appears while per-app automation is on.
+        MenuBarExtra("Kaliber Config", systemImage: "keyboard", isInserted: $profiles.automationEnabled) {
+            MenuBarContent().environmentObject(profiles)
+        }
     }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// True while per-app automation is on: closing the window then leaves the app in the menu bar.
+    static var keepRunning = false
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Developer aid: KALIBER_SNAPSHOT=<dir> renders the preview figures to PNG and quits.
         if let dir = ProcessInfo.processInfo.environment["KALIBER_SNAPSHOT"] {
@@ -30,7 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
     }
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { !Self.keepRunning }
 }
 
 @MainActor

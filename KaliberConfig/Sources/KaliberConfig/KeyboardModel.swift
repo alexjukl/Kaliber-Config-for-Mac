@@ -18,6 +18,10 @@ final class KeyboardModel: ObservableObject {
     @Published var colourPages: [String: HverColourPage] = [:]
     @Published private(set) var savedColourPages: [String: HverColourPage] = [:]
     @Published var editingProfile = 0
+    /// Macros stored on the keyboard (shared by all profiles); key entries reference them by index.
+    @Published var macros: [HverMacro] = []
+    @Published private(set) var savedMacros: [HverMacro] = []
+    @Published private(set) var macroCapacity = Hver.macroAreaDefault
 
     @Published private(set) var status = ""
     @Published var lastError: String?
@@ -28,7 +32,9 @@ final class KeyboardModel: ObservableObject {
         reload()
     }
 
-    var isDirty: Bool { info != savedInfo || profiles != savedProfiles || keyMaps != savedKeyMaps || colourPages != savedColourPages }
+    var isDirty: Bool { info != savedInfo || profiles != savedProfiles || keyMaps != savedKeyMaps || colourPages != savedColourPages || macros != savedMacros }
+
+    var macroAreaBytes: Int { HverMacroArea.encode(macros, capacity: .max)?.count ?? 0 }
 
     static func pageKey(_ profile: Int, _ set: Int) -> String { "\(profile).\(set)" }
 
@@ -51,6 +57,9 @@ final class KeyboardModel: ObservableObject {
             profiles = ps; savedProfiles = ps
             keyMaps = ks; savedKeyMaps = ks
             colourPages = [:]; savedColourPages = [:]
+            macroCapacity = Int(i.raw[11]) << 7
+            let ms = HverMacroArea.decode((try? keyboard.readMacroArea(count: macroCapacity)) ?? []) ?? []
+            macros = ms; savedMacros = ms
             editingProfile = i.activeProfile
             for (idx, pr) in ps.enumerated() where pr.mode == .custom { loadColourPage(profile: idx, set: pr.customSet) }
             if defaultKeyMap == nil { defaultKeyMap = try? keyboard.readDefaultKeyMap() }
@@ -61,12 +70,18 @@ final class KeyboardModel: ObservableObject {
         }
     }
 
-    func revert() { info = savedInfo; profiles = savedProfiles; keyMaps = savedKeyMaps; colourPages = savedColourPages; status = "Changes discarded" }
+    func revert() { info = savedInfo; profiles = savedProfiles; keyMaps = savedKeyMaps; colourPages = savedColourPages; macros = savedMacros; status = "Changes discarded" }
 
     func apply() {
         guard !busy else { return }
         busy = true; defer { busy = false }
         do {
+            if macros != savedMacros {
+                guard let bytes = HverMacroArea.encode(macros, capacity: macroCapacity) else {
+                    lastError = "Macros exceed the keyboard's \(macroCapacity)-byte macro memory"; return
+                }
+                try keyboard.writeMacroArea(bytes); savedMacros = macros
+            }
             for p in 0..<Hver.profileCount where profiles.indices.contains(p) {
                 if profiles[p] != savedProfiles[p] { try keyboard.writeProfile(profiles[p], index: p); savedProfiles[p] = profiles[p] }
                 if keyMaps[p] != savedKeyMaps[p] { try keyboard.writeKeyMap(keyMaps[p], profile: p); savedKeyMaps[p] = keyMaps[p] }
@@ -93,12 +108,13 @@ final class KeyboardModel: ObservableObject {
         var profiles: [[UInt8]]
         var keyMaps: [[UInt8]]
         var colourPages: [String: [UInt8]]? = nil
+        var macros: [HverMacro]? = nil
     }
 
     func backupData() throws -> Data {
         guard let i = savedInfo else { throw HIDError.deviceGone }
         let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]; enc.dateEncodingStrategy = .iso8601
-        return try enc.encode(Backup(date: Date(), info: i.raw, profiles: savedProfiles.map(\.raw), keyMaps: savedKeyMaps.map(\.raw), colourPages: savedColourPages.mapValues(\.raw)))
+        return try enc.encode(Backup(date: Date(), info: i.raw, profiles: savedProfiles.map(\.raw), keyMaps: savedKeyMaps.map(\.raw), colourPages: savedColourPages.mapValues(\.raw), macros: savedMacros))
     }
 
     func loadBackup(_ data: Data) throws {
@@ -110,6 +126,7 @@ final class KeyboardModel: ObservableObject {
         profiles = try b.profiles.map { try HverProfile(raw: $0) }
         keyMaps = try b.keyMaps.map { try HverKeyMap(raw: $0) }
         for (k, v) in b.colourPages ?? [:] { colourPages[k] = try HverColourPage(raw: v) }
+        if let ms = b.macros { macros = ms }
         status = "Backup loaded — press Apply to write it to the keyboard"
     }
 }

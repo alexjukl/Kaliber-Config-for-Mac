@@ -21,10 +21,13 @@ public enum Hver {
     public static let colourPageLength = 378
     public static let colourPageStride = 0x200
     public static let colourChunk = 0x36            // 18 keys per packet
+    /// Macro area size = info[11] << 7 (0x50 → 10240 bytes on this firmware).
+    public static let macroAreaDefault = 10240
+    public static let macroHeader = 16
 
     public enum Command: UInt8 {
         case begin = 0x01, end = 0x02, readInfo = 0x03, writeInfo = 0x04, readMem = 0x05, writeMem = 0x06
-        case readKeys = 0x07, writeKeys = 0x08, writeMacros = 0x0A, readDefaultKeys = 0x0F, readLED = 0x10, writeLED = 0x11
+        case readKeys = 0x07, writeKeys = 0x08, readMacros = 0x09, writeMacros = 0x0A, readDefaultKeys = 0x0F, readLED = 0x10, writeLED = 0x11
     }
 
     /// Builds a 63-byte payload (report ID excluded) with the vendor checksum.
@@ -124,6 +127,10 @@ public enum HverKey: Equatable, Hashable, Codable, Sendable {
     case none
     case key(usage: UInt8)
     case modifier(bit: UInt8)
+    case media(usage: UInt16)          // HID consumer-page usage, e.g. 0xCD play/pause
+    case macro(index: Int)             // index into the macro area
+    case mouseButton(mask: UInt8)      // 0x01 left, 0x02 right, 0x04 middle
+    case mouseWheel(up: Bool)
     case raw(UInt8, UInt8, UInt8)
 
     public init(bytes b: ArraySlice<UInt8>) {
@@ -132,6 +139,10 @@ public enum HverKey: Equatable, Hashable, Codable, Sendable {
         case (0, 0): self = .none
         case (2, 2): self = .key(usage: a[2])
         case (2, 1): self = .modifier(bit: a[2])
+        case (3, _): self = .media(usage: UInt16(a[1]) | UInt16(a[2]) << 8)
+        case (5, 1): self = .macro(index: Int(a[2]))
+        case (1, 1): self = .mouseButton(mask: a[2])
+        case (1, 5): self = .mouseWheel(up: a[2] != 0xFF)
         default: self = .raw(a[0], a[1], a[2])
         }
     }
@@ -140,6 +151,10 @@ public enum HverKey: Equatable, Hashable, Codable, Sendable {
         case .none: return [0, 0, 0]
         case .key(let u): return [2, 2, u]
         case .modifier(let b): return [2, 1, b]
+        case .media(let u): return [3, UInt8(u & 0xFF), UInt8(u >> 8)]
+        case .macro(let i): return [5, 1, UInt8(clamping: i)]
+        case .mouseButton(let m): return [1, 1, m]
+        case .mouseWheel(let up): return [1, 5, up ? 0x01 : 0xFF]
         case .raw(let x, let y, let z): return [x, y, z]
         }
     }
@@ -160,9 +175,134 @@ public enum HverKey: Equatable, Hashable, Codable, Sendable {
     public var name: String {
         switch self {
         case .none: return "—"
+        case .media(let u): return HverMediaKey(rawValue: u)?.name ?? String(format: "Consumer 0x%03X", u)
+        case .macro(let i): return "Macro \(i + 1)"
+        case .mouseButton(let m): return ["Mouse left", "Mouse right", "Mouse middle"].enumerated().filter { m & (1 << $0.offset) != 0 }.map(\.element).joined(separator: "+")
+        case .mouseWheel(let up): return up ? "Wheel up" : "Wheel down"
         case .raw(let x, let y, let z): return String(format: "raw %02x %02x %02x", x, y, z)
         default: return usage.map(HIDUsage.name) ?? "?"
         }
+    }
+}
+
+/// Consumer-page usages the vendor tool offers as "Media" functions (table at 0x652A00 in the tool).
+public enum HverMediaKey: UInt16, CaseIterable, Codable, Sendable, Identifiable {
+    case mediaPlayer = 0x183, playPause = 0xCD, stop = 0xB7, previous = 0xB6, next = 0xB5, volumeDown = 0xEA, volumeUp = 0xE9, mute = 0xE2
+    case home = 0x223, refresh = 0x227, browserStop = 0x226, back = 0x224, forward = 0x225, favorites = 0x22A, search = 0x221
+    case explorer = 0x194, calculator = 0x192, email = 0x18A
+    public var id: UInt16 { rawValue }
+    public var name: String {
+        switch self {
+        case .mediaPlayer: return "Media player"; case .playPause: return "Play / Pause"; case .stop: return "Stop"; case .previous: return "Previous track"; case .next: return "Next track"
+        case .volumeDown: return "Volume down"; case .volumeUp: return "Volume up"; case .mute: return "Mute"; case .home: return "Browser home"; case .refresh: return "Refresh"
+        case .browserStop: return "Browser stop"; case .back: return "Browser back"; case .forward: return "Browser forward"; case .favorites: return "Favorites"; case .search: return "Search"
+        case .explorer: return "File explorer"; case .calculator: return "Calculator"; case .email: return "E-mail"
+        }
+    }
+}
+
+// MARK: - Macro area (cmd 0x0A / 0x09)
+
+public struct HverMacroEvent: Equatable, Codable, Sendable {
+    public enum Kind: Equatable, Codable, Sendable {
+        case key(usage: UInt8)          // HID keyboard usage
+        case modifier(bit: UInt8)       // 0x01 Ctrl … 0x80 right GUI
+        case consumer(usage: UInt16)
+        case mouseButton(mask: UInt8)
+        case mouseWheel(up: Bool)
+        case raw(type: UInt8, payload: UInt16)
+    }
+    public var kind: Kind
+    public var release: Bool
+    public var delayMs: Int     // delay before this event, 10 ms resolution, max 40950
+    public init(kind: Kind, release: Bool, delayMs: Int) { self.kind = kind; self.release = release; self.delayMs = delayMs }
+
+    /// 4-byte wire form: u16 [15]=release [14:12]=type [11:0]=delay/10, then u16 payload (LE).
+    public var words: (UInt16, UInt16) {
+        var w0 = UInt16(max(0, min(4095, delayMs / 10)))
+        if release { w0 |= 0x8000 }
+        let w1: UInt16
+        switch kind {
+        case .key(let u): w0 |= 0x2000; w1 = 0x0002 | UInt16(u) << 8
+        case .modifier(let b): w0 |= 0x2000; w1 = 0x0001 | UInt16(b) << 8
+        case .consumer(let u): w0 |= 0x3000; w1 = u
+        case .mouseButton(let m): w0 |= 0x1000; w1 = 0x0001 | UInt16(m) << 8
+        case .mouseWheel(let up): w0 |= 0x1000; w1 = up ? 0x0105 : 0xFF05
+        case .raw(let t, let p): w0 |= UInt16(t & 7) << 12; w1 = p
+        }
+        return (w0, w1)
+    }
+
+    public init(w0: UInt16, w1: UInt16) {
+        release = w0 & 0x8000 != 0
+        delayMs = Int(w0 & 0x0FFF) * 10
+        let type = UInt8((w0 >> 12) & 7)
+        switch (type, w1 & 0xFF) {
+        case (2, 2): kind = .key(usage: UInt8(w1 >> 8))
+        case (2, 1): kind = .modifier(bit: UInt8(w1 >> 8))
+        case (3, _): kind = .consumer(usage: w1)
+        case (1, 1): kind = .mouseButton(mask: UInt8(w1 >> 8))
+        case (1, 5): kind = .mouseWheel(up: (w1 >> 8) != 0xFF)
+        default: kind = .raw(type: type, payload: w1)
+        }
+    }
+}
+
+public struct HverMacro: Equatable, Codable, Sendable {
+    public var name: String = ""
+    public var repeatCount: Int = 1
+    public var events: [HverMacroEvent] = []
+    public init(name: String = "", repeatCount: Int = 1, events: [HverMacroEvent] = []) { self.name = name; self.repeatCount = repeatCount; self.events = events }
+}
+
+/// The macro area: `55 AA | size | count | namesIncluded | 8×0 | u16 offsets… | records`.
+/// Record: u16 eventCount, u8 repeat, u8 nameLength(UTF-16 units), events (4 B each), optional UTF-16LE name.
+public enum HverMacroArea {
+    public static func encode(_ macros: [HverMacro], withNames: Bool = true, capacity: Int = Hver.macroAreaDefault) -> [UInt8]? {
+        func build(names: Bool) -> [UInt8] {
+            var out = [UInt8](repeating: 0, count: Hver.macroHeader + macros.count * 2)
+            for (i, m) in macros.enumerated() {
+                let off = out.count
+                out[Hver.macroHeader + i * 2] = UInt8(off & 0xFF); out[Hver.macroHeader + i * 2 + 1] = UInt8(off >> 8)
+                let nameUnits = names ? Array(m.name.utf16.prefix(255)) : []
+                out += [UInt8(m.events.count & 0xFF), UInt8(m.events.count >> 8), UInt8(clamping: m.repeatCount), UInt8(nameUnits.count)]
+                for e in m.events { let (a, b) = e.words; out += [UInt8(a & 0xFF), UInt8(a >> 8), UInt8(b & 0xFF), UInt8(b >> 8)] }
+                for u in nameUnits { out += [UInt8(u & 0xFF), UInt8(u >> 8)] }
+            }
+            out[0] = 0xAA; out[1] = 0x55
+            out[2] = UInt8(out.count & 0xFF); out[3] = UInt8(out.count >> 8)
+            out[4] = UInt8(macros.count & 0xFF); out[5] = UInt8(macros.count >> 8)
+            out[6] = names ? 1 : 0; out[7] = 0
+            return out
+        }
+        var bytes = build(names: withNames)
+        if bytes.count > capacity { bytes = build(names: false) }
+        return bytes.count <= capacity ? bytes : nil
+    }
+
+    public static func decode(_ d: [UInt8]) -> [HverMacro]? {
+        guard d.count >= Hver.macroHeader, d[0] == 0xAA, d[1] == 0x55 else { return nil }
+        let count = Int(d[4]) | Int(d[5]) << 8
+        let names = d[6] != 0
+        var out: [HverMacro] = []
+        for i in 0..<count {
+            let oi = Hver.macroHeader + i * 2
+            guard oi + 1 < d.count else { return nil }
+            var p = Int(d[oi]) | Int(d[oi + 1]) << 8
+            guard p + 4 <= d.count else { return nil }
+            let n = Int(d[p]) | Int(d[p + 1]) << 8
+            var m = HverMacro(); m.repeatCount = Int(d[p + 2]); let nameLen = Int(d[p + 3]); p += 4
+            for _ in 0..<n {
+                guard p + 4 <= d.count else { return nil }
+                m.events.append(HverMacroEvent(w0: UInt16(d[p]) | UInt16(d[p + 1]) << 8, w1: UInt16(d[p + 2]) | UInt16(d[p + 3]) << 8)); p += 4
+            }
+            if names, nameLen > 0, p + nameLen * 2 <= d.count {
+                let units = (0..<nameLen).map { UInt16(d[p + $0 * 2]) | UInt16(d[p + $0 * 2 + 1]) << 8 }
+                m.name = String(utf16CodeUnits: units, count: units.count)
+            }
+            out.append(m)
+        }
+        return out
     }
 }
 
@@ -228,6 +368,18 @@ public final class HverKeyboard {
     public func readDefaultKeyMap() throws -> HverKeyMap { try HverKeyMap(raw: try readChunked(.readDefaultKeys, addr: 0, count: Hver.keyMapLength)) }
     public func writeKeyMap(_ map: HverKeyMap, profile p: Int) throws {
         try transaction { try writeChunked(.writeKeys, addr: p * Hver.keyMapLength, data: map.raw) }
+    }
+
+    /// Reads the raw macro area (up to `count` bytes).
+    public func readMacroArea(count: Int = Hver.macroAreaDefault) throws -> [UInt8] {
+        let head = try readChunked(.readMacros, addr: 0, count: Hver.macroHeader)
+        guard head[0] == 0xAA, head[1] == 0x55 else { return head }
+        let size = min(count, max(Hver.macroHeader, Int(head[2]) | Int(head[3]) << 8))
+        return head + (size > Hver.macroHeader ? try readChunked(.readMacros, addr: Hver.macroHeader, count: size - Hver.macroHeader) : [])
+    }
+
+    public func writeMacroArea(_ bytes: [UInt8]) throws {
+        try transaction { try writeChunked(.writeMacros, addr: 0, data: bytes) }
     }
 
     /// Reads per-key colour set `set` (0–2) of `profile`. Page address = (profile*3 + set) * 0x200.

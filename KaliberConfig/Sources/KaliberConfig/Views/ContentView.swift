@@ -1,7 +1,7 @@
 import SwiftUI
 import KaliberHID
 
-enum SidebarItem: Hashable { case mouse, keyboard }
+enum SidebarItem: Hashable { case mouse, keyboard, profiles }
 
 struct ContentView: View {
     @EnvironmentObject var monitor: DeviceMonitor
@@ -26,6 +26,9 @@ struct ContentView: View {
                     } icon: { Image(systemName: "keyboard.fill").foregroundStyle(monitor.keyboard == nil ? .secondary : .primary) }
                     .tag(SidebarItem.keyboard)
                 }
+                Section {
+                    Label("Profiles & Automation", systemImage: "rectangle.stack.badge.person.crop").tag(SidebarItem.profiles)
+                }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220)
         } detail: {
@@ -33,6 +36,7 @@ struct ContentView: View {
                 PermissionView()
             } else {
                 switch selection {
+                case .profiles: ProfilesView()
                 case .keyboard:
                     if let k = monitor.keyboard { KeyboardView(model: k).id(ObjectIdentifier(k)) }
                     else { NotConnectedView(name: "HVER PRO X keyboard") }
@@ -70,6 +74,10 @@ struct PermissionView: View {
             if monitor.access == .denied {
                 Text("Enable “Kaliber Config” under Privacy & Security → Input Monitoring, then come back here (or relaunch the app).")
                     .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 460)
+                Button("Still denied after enabling? Reset permission and ask again") { monitor.resetAccess() }
+                    .font(.callout)
+                Text("Needed once after updating from a build with a different signature — macOS keeps the old record.")
+                    .font(.caption).foregroundStyle(.tertiary)
             }
         }
         .padding(40)

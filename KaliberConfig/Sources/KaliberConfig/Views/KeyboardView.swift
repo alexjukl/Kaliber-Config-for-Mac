@@ -9,7 +9,7 @@ struct KeyboardView: View {
     @State private var showBackupExporter = false
 
     private var previewMode: KeyboardPreviewMode? {
-        switch tab { case 0: return .lighting; case 1: return .keys; default: return nil }
+        switch tab { case 0: return .lighting; case 1: return .keys; default: return nil }   // Macros/Advanced: no visual
     }
 
     var body: some View {
@@ -36,7 +36,8 @@ struct KeyboardView: View {
                     TabView(selection: $tab) {
                         KeyboardLightingView(model: model).tabItem { Text("Lighting") }.tag(0)
                         KeyboardKeysView(model: model).tabItem { Text("Keys") }.tag(1)
-                        KeyboardAdvancedView(model: model).tabItem { Text("Advanced") }.tag(2)
+                        KeyboardMacrosView(model: model).tabItem { Text("Macros") }.tag(2)
+                        KeyboardAdvancedView(model: model).tabItem { Text("Advanced") }.tag(3)
                     }
                     .padding()
                     if let previewMode {
@@ -158,8 +159,6 @@ struct KeyboardKeysView: View {
         return (0..<Hver.keyCount).filter { d[$0] != .none }
     }
 
-    private var usageChoices: [UInt8] { HIDUsage.names.keys.filter { $0 < 0xF0 }.sorted() }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -176,13 +175,7 @@ struct KeyboardKeysView: View {
                     HStack {
                         Text(model.defaultKeyMap?[i].name ?? "Key \(i)").frame(width: 140, alignment: .leading)
                         Image(systemName: "arrow.right").foregroundStyle(.secondary)
-                        Picker("", selection: Binding<UInt8>(
-                            get: { map?[i].usage ?? 0 },
-                            set: { u in guard model.keyMaps.indices.contains(p) else { return }; model.keyMaps[p][i] = u == 0 ? .none : HverKey.from(usage: u) })) {
-                            Text("Disabled").tag(UInt8(0))
-                            ForEach(usageChoices, id: \.self) { u in Text(HIDUsage.name(u)).tag(u) }
-                            if let k = map?[i], case .raw = k { Text(k.name).tag(UInt8(0xFF)) }
-                        }.labelsHidden().frame(width: 170)
+                        KeyAssignmentPicker(model: model, profile: p, index: i)
                         if let d = model.defaultKeyMap, let m = map, m[i] != d[i] {
                             Image(systemName: "pencil.circle.fill").foregroundStyle(.orange).help("Changed from factory")
                         }
@@ -190,7 +183,7 @@ struct KeyboardKeysView: View {
                     }
                 }
             }
-            Text("Macros, media keys and Fn-layer functions from the Windows tool are not decoded yet; standard key remapping writes the same 3-byte entries the keyboard ships with.")
+            Text("Keys can become another key, a media function, a macro (define them on the Macros tab), a mouse button, or be disabled. Fn-layer functions are handled by the keyboard itself.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -221,6 +214,69 @@ struct KeyboardAdvancedView: View {
         VStack(alignment: .leading) {
             Text(title).font(.caption).foregroundStyle(.secondary)
             Text(bytes.map { String(format: "%02x", $0) }.joined(separator: " ")).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+        }
+    }
+}
+
+
+/// Assigns one physical key: category + value, writing the 3-byte key-map entry.
+struct KeyAssignmentPicker: View {
+    @ObservedObject var model: KeyboardModel
+    let profile: Int
+    let index: Int
+
+    enum Category: String, CaseIterable, Identifiable { case key = "Key", media = "Media", macro = "Macro", mouse = "Mouse", disabled = "Disabled"; var id: String { rawValue } }
+
+    private var current: HverKey { model.keyMaps.indices.contains(profile) ? model.keyMaps[profile][index] : .none }
+    private func set(_ k: HverKey) { if model.keyMaps.indices.contains(profile) { model.keyMaps[profile][index] = k } }
+
+    private var category: Category {
+        switch current {
+        case .key, .modifier, .raw: return .key
+        case .media: return .media
+        case .macro: return .macro
+        case .mouseButton, .mouseWheel: return .mouse
+        case .none: return .disabled
+        }
+    }
+    private static let usageChoices: [UInt8] = HIDUsage.names.keys.filter { $0 < 0xF0 }.sorted()
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Picker("", selection: Binding(get: { category }, set: { c in
+                switch c {
+                case .key: set(model.defaultKeyMap?[index] ?? .key(usage: 0x04))
+                case .media: set(.media(usage: HverMediaKey.playPause.rawValue))
+                case .macro: set(.macro(index: 0))
+                case .mouse: set(.mouseButton(mask: 1))
+                case .disabled: set(.none)
+                }
+            })) { ForEach(Category.allCases) { Text($0.rawValue).tag($0) } }.labelsHidden().frame(width: 95)
+
+            switch category {
+            case .key:
+                Picker("", selection: Binding<UInt8>(get: { current.usage ?? 0 }, set: { set(HverKey.from(usage: $0)) })) {
+                    ForEach(Self.usageChoices, id: \.self) { u in Text(HIDUsage.name(u)).tag(u) }
+                    if case .raw = current { Text(current.name).tag(UInt8(0)) }
+                }.labelsHidden().frame(width: 150)
+            case .media:
+                Picker("", selection: Binding<UInt16>(get: { if case .media(let u) = current { return u } else { return 0 } }, set: { set(.media(usage: $0)) })) {
+                    ForEach(HverMediaKey.allCases) { m in Text(m.name).tag(m.rawValue) }
+                }.labelsHidden().frame(width: 150)
+            case .macro:
+                Picker("", selection: Binding<Int>(get: { if case .macro(let i) = current { return i } else { return 0 } }, set: { set(.macro(index: $0)) })) {
+                    if model.macros.isEmpty { Text("No macros yet").tag(0) }
+                    ForEach(model.macros.indices, id: \.self) { i in Text(model.macros[i].name.isEmpty ? "Macro \(i + 1)" : model.macros[i].name).tag(i) }
+                }.labelsHidden().frame(width: 150)
+            case .mouse:
+                Picker("", selection: Binding<Int>(get: {
+                    switch current { case .mouseButton(let m): return Int(m); case .mouseWheel(let up): return up ? 10 : 11; default: return 1 }
+                }, set: { v in set(v == 10 ? .mouseWheel(up: true) : v == 11 ? .mouseWheel(up: false) : .mouseButton(mask: UInt8(v))) })) {
+                    Text("Left button").tag(1); Text("Right button").tag(2); Text("Middle button").tag(4); Text("Wheel up").tag(10); Text("Wheel down").tag(11)
+                }.labelsHidden().frame(width: 150)
+            case .disabled:
+                Text("No function").foregroundStyle(.secondary).frame(width: 150, alignment: .leading)
+            }
         }
     }
 }

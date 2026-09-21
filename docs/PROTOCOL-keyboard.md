@@ -32,6 +32,7 @@ byte. The vendor tool retries 3× with a 1 s timeout.
 | `0x06` | write `len` bytes of the settings area at `addr` |
 | `0x07` | read key map: 378 bytes per profile at `addr = profile*378` (56-byte chunks) |
 | `0x08` | write key map (same addressing) |
+| `0x09` | read macro area at `addr` (blank flash reads as `FF`) |
 | `0x0A` | write macro area from address 0 (56-byte chunks) |
 | `0x0F` | read the factory default key map (378 bytes) |
 | `0x10` | read per-key colours: `addr = page*0x200 + led*3`, `page = profile*3 + set` |
@@ -72,9 +73,19 @@ Keys, 12 Falling Rainbow, 13 Rainbow Twist, 14 Rainbow Waves, 15 Rainbow Rain, 1
 
 ## Key map (cmd 0x07/0x08/0x0F): 126 entries × 3 bytes, column-major 6 rows × 21 columns
 
-Entry `[type, kind, code]`: `02 02 <HID usage>` normal key, `02 01 <bit>` modifier
-(bit 0x01 Ctrl, 0x02 Shift, 0x04 Alt, 0x08 GUI, high nibble = right side), `00 00 00` no key.
-Other `type` values (macro, media, function) exist in the vendor tool but are not decoded yet.
+Entry `[type, kind, code]`:
+
+| Bytes | Meaning |
+|---|---|
+| `02 02 <usage>` | keyboard key (HID usage) |
+| `02 01 <bit>` | modifier: 0x01 Ctrl, 0x02 Shift, 0x04 Alt, 0x08 GUI, high nibble = right side |
+| `03 <lo> <hi>` | media / consumer-page usage (16-bit LE), e.g. `03 CD 00` play/pause |
+| `05 01 <n>` | play macro *n* (0-based index into the macro area) |
+| `01 01 <mask>` | mouse button: 0x01 left, 0x02 right, 0x04 middle |
+| `01 05 01` / `01 05 FF` | mouse wheel up / down |
+| `00 00 00` | disabled |
+
+`05 02 00` and `05 05 <v>` also appear in the vendor tool (unknown functions).
 Factory map (matrix order, first entries): Esc, `, Tab, CapsLock, LShift, LCtrl, F1, 1, Q, A,
 non-US-\, LGUI, F2, 2, W, S, …
 
@@ -85,3 +96,22 @@ key). The profile block byte `0x12` selects which set the Custom pattern shows. 
 row-major** in the same 6×21 matrix as the key map: `led = row*21 + col` while the key map uses
 `index = col*6 + row` (verified on hardware: Esc → 0, F1…F12 → 1…12, A → 64). IOGEAR pre-loads
 patterns into all nine pages; writing a page takes effect immediately.
+
+## Macro area (cmd 0x09/0x0A, from address 0)
+
+Capacity = info block byte 11 << 7 (`0x50` → 10240 bytes). Layout (all little-endian), verified
+by a byte-exact write/read round trip:
+
+```
+u16 AA55 | u16 total size | u16 macro count | u16 names present (1/0) | 8 × 00
+u16 offset[count]                      // absolute byte offset of each record
+record: u16 event count | u8 repeat count | u8 name length (UTF-16 units)
+        events × 4 bytes | name as UTF-16LE (only if names present)
+event:  u16 w0 = release<<15 | type<<12 | delay_ms/10 (12 bits)
+        u16 w1 = payload
+        type 1 mouse:    w1 = 0x0001 | mask<<8 (buttons) · 0x0105 wheel up · 0xFF05 wheel down
+        type 2 keyboard: w1 = 0x0002 | usage<<8 · modifiers 0x0001 | bit<<8
+        type 3 consumer: w1 = usage
+        type 4 system:   w1 = usage
+```
+Playback semantics (delay = wait before the event) follow the vendor tool's serializer.

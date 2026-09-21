@@ -35,6 +35,14 @@ final class DeviceMonitor: ObservableObject {
         access = HIDAccess.status
     }
 
+    /// Clears this app's Input Monitoring record (stale after the app's signing identity changes) and asks again.
+    func resetAccess() {
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        p.arguments = ["reset", "ListenEvent", Bundle.main.bundleIdentifier ?? "com.alexjukl.kaliberconfig"]
+        try? p.run(); p.waitUntilExit()
+        requestAccess()
+    }
+
     private func added(_ dev: HIDDevice) {
         if dev.vendorID == Korona.vendorID, dev.productID == Korona.productID, dev.hasUsage(page: Korona.vendorUsagePage) {
             if mouse == nil { mouse = MouseModel(device: dev) }

@@ -62,3 +62,34 @@ final class HverColourPageTests: XCTestCase {
         p.fill(RGB(1, 2, 3)); XCTAssertEqual(p[col: 20, row: 5], RGB(1, 2, 3))
     }
 }
+
+final class HverMacroTests: XCTestCase {
+    func testMacroAreaMatchesHardwareRoundTrip() throws {
+        // Exactly the bytes written to and read back from the keyboard on 2026-09-21 (one macro "kg": K↓ K↑ G↓ G↑, 20 ms).
+        let expected: [UInt8] = [0xAA, 0x55, 0x2A, 0x00, 0x01, 0x00, 0x01, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0x12, 0x00,
+                                 0x04, 0x00, 0x01, 0x02, 0x02, 0x20, 0x02, 0x0E, 0x02, 0xA0, 0x02, 0x0E, 0x02, 0x20, 0x02, 0x0A, 0x02, 0xA0, 0x02, 0x0A,
+                                 0x6B, 0x00, 0x67, 0x00]
+        var m = HverMacro(name: "kg")
+        for (u, r) in [(0x0E, false), (0x0E, true), (0x0A, false), (0x0A, true)] as [(UInt8, Bool)] { m.events.append(HverMacroEvent(kind: .key(usage: u), release: r, delayMs: 20)) }
+        XCTAssertEqual(HverMacroArea.encode([m]), expected)
+        XCTAssertEqual(HverMacroArea.decode(expected), [m])
+        XCTAssertNil(HverMacroArea.encode([m], capacity: 20))
+    }
+
+    func testMacroEventEncodings() {
+        XCTAssertEqual(HverMacroEvent(kind: .modifier(bit: 0x02), release: false, delayMs: 100).words.0, 0x200A)
+        XCTAssertEqual(HverMacroEvent(kind: .modifier(bit: 0x02), release: false, delayMs: 100).words.1, 0x0201)
+        XCTAssertEqual(HverMacroEvent(kind: .consumer(usage: 0xCD), release: true, delayMs: 0).words.0, 0xB000)
+        XCTAssertEqual(HverMacroEvent(kind: .mouseWheel(up: false), release: false, delayMs: 10).words.1, 0xFF05)
+        let e = HverMacroEvent(w0: 0x1005, w1: 0x0401)
+        XCTAssertEqual(e.kind, .mouseButton(mask: 4)); XCTAssertEqual(e.delayMs, 50)
+    }
+
+    func testKeyEntriesForMediaMacroMouse() {
+        XCTAssertEqual(HverKey.media(usage: 0xCD).bytes, [3, 0xCD, 0x00])
+        XCTAssertEqual(HverKey(bytes: [3, 0x23, 0x02][...]), .media(usage: 0x223))
+        XCTAssertEqual(HverKey.macro(index: 2).bytes, [5, 1, 2])
+        XCTAssertEqual(HverKey(bytes: [1, 5, 0xFF][...]), .mouseWheel(up: false))
+        XCTAssertEqual(HverKey(bytes: [1, 1, 2][...]).name, "Mouse right")
+    }
+}
