@@ -52,6 +52,7 @@ final class KeyboardModel: ObservableObject {
             keyMaps = ks; savedKeyMaps = ks
             colourPages = [:]; savedColourPages = [:]
             editingProfile = i.activeProfile
+            for (idx, pr) in ps.enumerated() where pr.mode == .custom { loadColourPage(profile: idx, set: pr.customSet) }
             if defaultKeyMap == nil { defaultKeyMap = try? keyboard.readDefaultKeyMap() }
             lastError = nil
             status = "Read from keyboard (active profile \(i.activeProfile + 1))"

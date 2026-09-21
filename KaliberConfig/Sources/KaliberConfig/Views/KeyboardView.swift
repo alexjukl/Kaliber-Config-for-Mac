@@ -8,6 +8,10 @@ struct KeyboardView: View {
     @State private var showRestoreImporter = false
     @State private var showBackupExporter = false
 
+    private var previewMode: KeyboardPreviewMode? {
+        switch tab { case 0: return .lighting; case 1: return .keys; default: return nil }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if model.info == nil {
@@ -28,12 +32,20 @@ struct KeyboardView: View {
                     }.disabled(model.info?.activeProfile == model.editingProfile)
                 }
                 .padding(.horizontal).padding(.top, 8)
-                TabView(selection: $tab) {
-                    KeyboardLightingView(model: model).tabItem { Text("Lighting") }.tag(0)
-                    KeyboardKeysView(model: model).tabItem { Text("Keys") }.tag(1)
-                    KeyboardAdvancedView(model: model).tabItem { Text("Advanced") }.tag(2)
+                HStack(spacing: 0) {
+                    TabView(selection: $tab) {
+                        KeyboardLightingView(model: model).tabItem { Text("Lighting") }.tag(0)
+                        KeyboardKeysView(model: model).tabItem { Text("Keys") }.tag(1)
+                        KeyboardAdvancedView(model: model).tabItem { Text("Advanced") }.tag(2)
+                    }
+                    .padding()
+                    if let previewMode {
+                        Divider()
+                        KeyboardPreview(model: model, mode: previewMode)
+                            .frame(width: 300)
+                            .background(Color(nsColor: .windowBackgroundColor))
+                    }
                 }
-                .padding()
                 Divider()
                 HStack {
                     if let e = model.lastError { Label(e, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).lineLimit(1) }

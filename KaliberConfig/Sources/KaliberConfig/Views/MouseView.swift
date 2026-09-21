@@ -9,6 +9,11 @@ struct MouseView: View {
     @State private var showBackupExporter = false
     @State private var confirmFactory = false
 
+    /// Tabs with a device visual get the preview pane; Macros/Advanced don't.
+    private var previewMode: MousePreviewMode? {
+        switch tab { case 0: return .dpi; case 1: return .lighting; case 2: return .buttons; default: return nil }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             if model.general == nil {
@@ -17,14 +22,22 @@ struct MouseView: View {
                     Button("Retry") { model.reload() }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                TabView(selection: $tab) {
-                    DPIView(model: model).tabItem { Text("DPI & Polling") }.tag(0)
-                    LightingView(model: model).tabItem { Text("Lighting") }.tag(1)
-                    ButtonsView(model: model).tabItem { Text("Buttons") }.tag(2)
-                    MacrosView(model: model).tabItem { Text("Macros") }.tag(3)
-                    AdvancedView(model: model).tabItem { Text("Advanced") }.tag(4)
+                HStack(spacing: 0) {
+                    TabView(selection: $tab) {
+                        DPIView(model: model).tabItem { Text("DPI & Polling") }.tag(0)
+                        LightingView(model: model).tabItem { Text("Lighting") }.tag(1)
+                        ButtonsView(model: model).tabItem { Text("Buttons") }.tag(2)
+                        MacrosView(model: model).tabItem { Text("Macros") }.tag(3)
+                        AdvancedView(model: model).tabItem { Text("Advanced") }.tag(4)
+                    }
+                    .padding()
+                    if let previewMode {
+                        Divider()
+                        MousePreview(model: model, mode: previewMode)
+                            .frame(width: 250)
+                            .background(Color(nsColor: .windowBackgroundColor))
+                    }
                 }
-                .padding()
                 Divider()
                 HStack {
                     if let e = model.lastError { Label(e, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.red).lineLimit(1) }
