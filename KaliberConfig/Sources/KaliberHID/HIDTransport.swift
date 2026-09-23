@@ -7,6 +7,7 @@ public enum HIDError: Error, LocalizedError {
     case openFailed(IOReturn)
     case transferFailed(IOReturn)
     case badReply([UInt8])
+    case timeout
     case deviceGone
 
     public var errorDescription: String? {
@@ -15,6 +16,7 @@ public enum HIDError: Error, LocalizedError {
         case .openFailed(let r): return String(format: "Could not open device (IOReturn 0x%08x).", UInt32(bitPattern: r))
         case .transferFailed(let r): return String(format: "USB transfer failed (IOReturn 0x%08x).", UInt32(bitPattern: r))
         case .badReply(let b): return "Unexpected reply from device: \(b.prefix(8).map { String(format: "%02x", $0) }.joined(separator: " "))"
+        case .timeout: return "The device did not answer in time."
         case .deviceGone: return "The device was disconnected."
         }
     }
@@ -67,6 +69,11 @@ public final class HIDDevice: Hashable, @unchecked Sendable {
             guard let page = p[kIOHIDDeviceUsagePageKey], let usage = p[kIOHIDDeviceUsageKey] else { return nil }
             return (page, usage)
         }
+    }
+
+    deinit {
+        close()
+        inputBuffer?.deallocate()
     }
 
     public func hasUsage(page: Int, usage: Int? = nil) -> Bool {
@@ -144,8 +151,11 @@ public final class HIDDevice: Hashable, @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard !listening else { return }
         let size = max(64, (IOHIDDeviceGetProperty(device, kIOHIDMaxInputReportSizeKey as CFString) as? Int) ?? 64)
-        inputBufferSize = size
-        inputBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: size)
+        if inputBuffer == nil || inputBufferSize < size {      // reuse the buffer across open/close cycles
+            inputBuffer?.deallocate()
+            inputBuffer = UnsafeMutablePointer<UInt8>.allocate(capacity: size)
+            inputBufferSize = size
+        }
         let ctx = Unmanaged.passUnretained(self).toOpaque()
         IOHIDDeviceRegisterInputReportCallback(device, inputBuffer!, size, { ctx, _, _, _, id, report, length in
             let me = Unmanaged<HIDDevice>.fromOpaque(ctx!).takeUnretainedValue()
@@ -180,7 +190,7 @@ public final class HIDDevice: Hashable, @unchecked Sendable {
             if let i = pendingReplies.firstIndex(where: matches) {
                 let r = pendingReplies[i]; pendingReplies.removeSubrange(0...i); return r
             }
-            if !replyLock.wait(until: deadline) { throw HIDError.badReply([]) }
+            if !replyLock.wait(until: deadline) { throw HIDError.timeout }
         }
     }
 

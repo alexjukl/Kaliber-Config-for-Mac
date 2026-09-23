@@ -17,8 +17,10 @@ final class DeviceMonitor: ObservableObject {
             .init(vendorID: Korona.vendorID, productID: Korona.productID),
             .init(vendorID: Hver.vendorID, productID: Hver.productID),
         ])
-        watcher.onAdd = { [weak self] dev in Task { @MainActor in self?.added(dev) } }
-        watcher.onRemove = { [weak self] dev in Task { @MainActor in self?.removed(dev) } }
+        // HIDWatcher is scheduled on the main run loop, so handle events in order, synchronously —
+        // re-queuing them as Tasks could process a quick re-plug's "added" before its "removed".
+        watcher.onAdd = { [weak self] dev in MainActor.assumeIsolated { self?.added(dev) } }
+        watcher.onRemove = { [weak self] dev in MainActor.assumeIsolated { self?.removed(dev) } }
         watcher.start()
         // TCC changes are not observable; poll cheaply while the app is open.
         accessTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
@@ -52,7 +54,7 @@ final class DeviceMonitor: ObservableObject {
     }
 
     private func removed(_ dev: HIDDevice) {
-        if let m = mouse, m.mouse.device == dev { mouse = nil }
+        if let m = mouse, m.mouse.device == dev { m.stop(); mouse = nil }
         if let k = keyboard, k.keyboard.device == dev { keyboard = nil }
     }
 }

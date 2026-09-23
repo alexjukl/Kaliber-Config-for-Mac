@@ -251,7 +251,12 @@ struct KeyAssignmentPicker: View {
                 case .mouse: set(.mouseButton(mask: 1))
                 case .disabled: set(.none)
                 }
-            })) { ForEach(Category.allCases) { Text($0.rawValue).tag($0) } }.labelsHidden().frame(width: 95)
+            })) {
+                ForEach(Category.allCases) { c in
+                    // A macro key must point at an existing macro — offer the category only once one exists.
+                    if c != .macro || !model.macros.isEmpty || category == .macro { Text(c.rawValue).tag(c) }
+                }
+            }.labelsHidden().frame(width: 95)
 
             switch category {
             case .key:
@@ -265,7 +270,6 @@ struct KeyAssignmentPicker: View {
                 }.labelsHidden().frame(width: 150)
             case .macro:
                 Picker("", selection: Binding<Int>(get: { if case .macro(let i) = current { return i } else { return 0 } }, set: { set(.macro(index: $0)) })) {
-                    if model.macros.isEmpty { Text("No macros yet").tag(0) }
                     ForEach(model.macros.indices, id: \.self) { i in Text(model.macros[i].name.isEmpty ? "Macro \(i + 1)" : model.macros[i].name).tag(i) }
                 }.labelsHidden().frame(width: 150)
             case .mouse:

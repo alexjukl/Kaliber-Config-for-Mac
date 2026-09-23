@@ -74,12 +74,15 @@ struct MacroEditor: View {
         }
         .padding(.leading)
         .onDisappear { stop() }
+        // Revert / re-read / restore / factory defaults replace the model underneath this editor;
+        // follow them so the local copy never writes a stale macro back.
+        .onChange(of: model.matrix?.macro(slot: slot)) { _, new in if !recording { macro = new ?? Macro() } }
     }
 
     private var usedBytes: Int { 2 + macro.events.reduce(0) { $0 + ($1.delayMs > 0x7F ? 4 : 2) } }
 
     private func store() {
-        guard var x = model.matrix else { return }
+        guard var x = model.matrix, macro != (x.macro(slot: slot) ?? Macro()) else { return }   // nothing edited
         if macro.events.isEmpty { x.setMacro(nil, slot: slot) }
         else if !x.setMacro(macro, slot: slot) { model.lastError = "Macro too long for the 128-byte slot"; return }
         model.matrix = x

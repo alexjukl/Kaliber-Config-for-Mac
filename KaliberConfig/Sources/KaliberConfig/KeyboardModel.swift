@@ -57,7 +57,7 @@ final class KeyboardModel: ObservableObject {
             profiles = ps; savedProfiles = ps
             keyMaps = ks; savedKeyMaps = ks
             colourPages = [:]; savedColourPages = [:]
-            macroCapacity = Int(i.raw[11]) << 7
+            macroCapacity = i.raw[11] == 0 ? Hver.macroAreaDefault : Int(i.raw[11]) << 7
             let ms = HverMacroArea.decode((try? keyboard.readMacroArea(count: macroCapacity)) ?? []) ?? []
             macros = ms; savedMacros = ms
             editingProfile = i.activeProfile
@@ -75,6 +75,14 @@ final class KeyboardModel: ObservableObject {
     func apply() {
         guard !busy else { return }
         busy = true; defer { busy = false }
+        // A key may only reference an existing macro; otherwise the keyboard would get a dangling index.
+        for (p, map) in keyMaps.enumerated() {
+            for i in 0..<Hver.keyCount {
+                if case .macro(let idx) = map[i], idx >= macros.count {
+                    lastError = "Profile \(p + 1): a key is assigned to Macro \(idx + 1), which doesn't exist — reassign it on the Keys tab"; return
+                }
+            }
+        }
         do {
             if macros != savedMacros {
                 guard let bytes = HverMacroArea.encode(macros, capacity: macroCapacity) else {

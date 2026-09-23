@@ -120,8 +120,12 @@ final class ProfileManager: ObservableObject {
     /// Writes a profile to whichever devices are connected.
     func apply(_ id: UUID, reason: String = "manual") {
         guard let p = profiles.first(where: { $0.id == id }) else { return }
-        var applied: [String] = []
-        if let m = monitor.mouse, let g = p.mouseGeneral, let mo = p.mouseMode, let x = p.mouseMatrix {
+        var applied: [String] = [], skipped: [String] = []
+        // Switching apps must never discard edits the user hasn't applied yet (reload() would).
+        let automatic = reason != "manual"
+        if automatic, monitor.mouse?.isDirty == true { skipped.append("mouse") }
+        if automatic, monitor.keyboard?.isDirty == true { skipped.append("keyboard") }
+        if !skipped.contains("mouse"), let m = monitor.mouse, let g = p.mouseGeneral, let mo = p.mouseMode, let x = p.mouseMatrix {
             do {
                 var general = try KoronaGeneral(raw: g)
                 if let cur = m.savedGeneral { general.raw.replaceSubrange(52..<58, with: cur.raw[52..<58]) }
@@ -132,12 +136,15 @@ final class ProfileManager: ObservableObject {
                 m.reload(); applied.append("mouse")
             } catch { status = "Mouse: \(error.localizedDescription)" }
         }
-        if let k = monitor.keyboard, let idx = p.keyboardProfile, var info = k.savedInfo, info.activeProfile != idx {
+        if skipped.contains("keyboard") {
+        } else if let k = monitor.keyboard, let idx = p.keyboardProfile, var info = k.savedInfo, info.activeProfile != idx {
             do { info.activeProfile = idx; try k.keyboard.writeInfo(info); k.reload(); applied.append("keyboard") }
             catch { status = "Keyboard: \(error.localizedDescription)" }
-        } else if monitor.keyboard != nil, p.keyboardProfile != nil { applied.append("keyboard") }
+        } else if monitor.keyboard?.savedInfo != nil, p.keyboardProfile != nil { applied.append("keyboard") }
         activeProfileID = id; lastApplied = id
-        status = "“\(p.name)” applied (\(reason))" + (applied.isEmpty ? " — no device connected" : "")
+        status = "“\(p.name)” applied (\(reason))"
+            + (skipped.isEmpty ? "" : " — \(skipped.joined(separator: " and ")) skipped: unapplied edits")
+            + (applied.isEmpty && skipped.isEmpty ? " — no device connected" : "")
     }
 
     // MARK: Rules / automation

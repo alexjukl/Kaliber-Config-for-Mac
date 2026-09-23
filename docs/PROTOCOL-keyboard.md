@@ -100,7 +100,8 @@ patterns into all nine pages; writing a page takes effect immediately.
 ## Macro area (cmd 0x09/0x0A, from address 0)
 
 Capacity = info block byte 11 << 7 (`0x50` → 10240 bytes). Layout (all little-endian), verified
-by a byte-exact write/read round trip:
+by a byte-exact write/read round trip and by recording a macro, assigning it to a key and
+playing it back on the physical keyboard:
 
 ```
 u16 AA55 | u16 total size | u16 macro count | u16 names present (1/0) | 8 × 00

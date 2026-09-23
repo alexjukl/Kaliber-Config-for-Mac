@@ -30,6 +30,9 @@ final class MouseModel: ObservableObject {
         }
     }
 
+    /// Stops background polling; called when the mouse is unplugged.
+    func stop() { pollTimer?.invalidate(); pollTimer = nil }
+
     var isDirty: Bool {
         general != savedGeneral || (mode?.writePayload != savedMode?.writePayload) || matrix != savedMatrix
     }

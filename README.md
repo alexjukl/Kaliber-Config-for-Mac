@@ -74,10 +74,8 @@ extracted/ (git-ignored)  the Windows installers, unpacked
   vendor binary but could not be confirmed on this firmware (XCQ501); scroll-down code unknown.
   DPI lock and XY-independent DPI are not exposed.
 * Keyboard: report-rate byte mapping and direction values follow the vendor UI but were not
-  visually verified; macro *storage* round-trips byte-exactly but playback semantics (delays,
-  repeat) follow the vendor tool's serializer without a hardware check yet; Fn-layer functions
-  are not exposed. Fn+PgUp/PgDn brightness changes are volatile
-  and do not show up in the app.
+  visually verified; Fn-layer functions are not exposed. Fn+PgUp/PgDn brightness changes are
+  volatile and do not show up in the app.
 * The firmware-update ("enter bootloader") command exists in the keyboard protocol and is
   deliberately never sent.
 
