@@ -19,7 +19,7 @@ ship with Windows software:
 Both screens have a live preview pane (on the tabs that have something to show) that renders the
 pending lighting, DPI indicator or button/key assignments before you press Apply.
 
-Everything the app writes was reverse-engineered from IOGEAR's own tools and verified on the
+Everything the app writes was verified on the
 hardware; unknown bytes are always read from the device and written back unchanged.
 Protocol notes: [docs/PROTOCOL-mouse.md](docs/PROTOCOL-mouse.md),
 [docs/PROTOCOL-keyboard.md](docs/PROTOCOL-keyboard.md).
